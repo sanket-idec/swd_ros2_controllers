@@ -74,54 +74,15 @@ source ~/ros2_ws/install/setup.bash
 
 ### A- On the SWD® Starter Kit
 
-The package comes with a preconfigured launchfile which can be started using the `ros2 launch` command:
+### 1. Create the two config files
 
-- `swd_diff_drive_controller_launch.py`: is a launchfile for the [SWD® Starter Kit](https://www.ez-wheel.com/en/development-kit-for-agv-and-amr) which has a differential kinematic. To use it, run the following command:
-
-```shell
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ezw/usr/lib
-ros2 launch swd_ros2_controllers swd_diff_drive_controller.launch.py
+```bash
+cd /opt/ezw/usr/etc/ezw-smc-core
+sudo nano swd_left_config.ini
+sudo nano swd_right_config.ini
 ```
 
-You can always use the node with the `ros2 run` command, the minimum required parameters are:
-
-```shell
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ezw/usr/lib
-ros2 run swd_ros2_controllers swd_diff_drive_controller --ros-args -p baseline_m:=0.485
-```
-
-The corresponding D-Bus services have to be started in order to use the nodes.
-
-Example with the [SWD® Starter Kit](https://www.ez-wheel.com/en/development-kit-for-agv-and-amr):
-
-- The service `ezw-dbus-user-session.service` is equivalent to running:
-
-```shell
-dbus-launch > /tmp/SYSTEMCTL_dbus.id ## [OPTIONAL]
-```
-
-- Prepare the environment
-
-```shell
-export $(cat /tmp/SYSTEMCTL_dbus.id) ## [OPTIONAL]
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ezw/usr/lib
-```
-
-- The service `ezw-swd-left.service` is equivalent to running:
-
-```shell
-/opt/ezw/usr/bin/ezw-smc-service /opt/ezw/usr/etc/ezw-smc-core/swd_left_config.ini
-```
-
-- The service `ezw-swd-right.service` is equivalent to running:
-
-```shell
-/opt/ezw/usr/bin/ezw-smc-service /opt/ezw/usr/etc/ezw-smc-core/swd_right_config.ini
-```
-
-Example of configuration files for [SWD® Starter Kit](https://www.ez-wheel.com/en/development-kit-for-agv-and-amr):
-
-### `swd_left_config.ini`
+### 2. Left wheel: `swd_left_config.ini`
 
 ```ini
 # SMC Drive service config file
@@ -131,14 +92,16 @@ coreNodeId = 6
 coreNodeIsMaster = true # Slave:false Master:true
 canDevice = can0
 dbusNamespace = swd_left
-
-HWConfigurationEntry = SWD_CORE
+HWConfigurationEntry = SWD_125.4
 HWConfigurationFile = /opt/ezw/data/configuration.json
-
 CANOpenEDSFile = /opt/ezw/usr/etc/ezw-canopen-dico/swd_core.eds
 ```
 
-### `swd_right_config.ini`
+```bash
+sudo chmod +x swd_left_config.ini
+```
+
+### 3. Right wheel: `swd_right_config.ini`
 
 ```ini
 # SMC Drive service config file
@@ -148,26 +111,108 @@ coreNodeId = 7
 coreNodeIsMaster = true # Slave:false Master:true
 canDevice = can0
 dbusNamespace = swd_right
-
-HWConfigurationEntry = SWD_CORE
+HWConfigurationEntry = SWD_125.4
 HWConfigurationFile = /opt/ezw/data/configuration.json
-
 CANOpenEDSFile = /opt/ezw/usr/etc/ezw-canopen-dico/swd_core.eds
 ```
 
-### `configuration.json`
+```bash
+sudo chmod +x swd_right_config.ini
+```
+
+> **Left vs right:** only `nodeId` (4 / 5), `coreNodeId` (6 / 7) and `dbusNamespace` (`swd_left` / `swd_right`) change.
+
+### 4. Create the hardware configuration file
+
+Initially only the `usr` directory exists in `/opt/ezw`. Create the `data` directory and the file inside it:
+
+```bash
+cd /opt/ezw
+sudo mkdir -p data
+cd /opt/ezw/data
+sudo nano configuration.json
+```
+
+Paste the following content:
 
 ```json
 [
-   {
-      "name": "SWD_CORE",
-      "nbStepRevolutionElec": 6,
-      "nbPolePair": 5,
-      "reduction": 14.0,
-      "diameter": 125.0
-   }
+  {
+    "name": "SWD_125.4",
+    "nbStepRevolutionElec": 6,
+    "nbPolePair": 5,
+    "reduction": 3.6521,
+    "diameter": 125.0,
+    "comment": "ratio 4 => 84 / 23"
+  },
+  {
+    "name": "SWD_125.14",
+    "nbStepRevolutionElec": 6,
+    "nbPolePair": 5,
+    "reduction": 13.7336,
+    "diameter": 125.0,
+    "comment": "ratio 14 => 3969 / 289"
+  }
 ]
 ```
+
+Then set the permission:
+
+```bash
+sudo chmod +x /opt/ezw/data/configuration.json
+```
+
+Installation is done. From here on, only the two sections below are needed each time the robot is started.
+
+---
+
+## Prepare CAN and D-Bus (every start-up)
+
+### 1. Initiate CAN communication
+
+```bash
+sudo modprobe peak_usb
+sudo ip link set down can0
+sudo ip link set can0 up type can bitrate 1000000 restart-ms 100
+sudo ip link set can0 txqueuelen 1000
+```
+
+### 2. Configure the D-Bus session
+
+This writes the D-Bus session address to a file that every terminal in the next section loads.
+
+```bash
+unset LD_LIBRARY_PATH
+/usr/bin/dbus-launch > /tmp/SYSTEMCTL_dbus.id
+```
+
+---
+
+## Start the SWD (every start-up)
+
+Run each block in its own terminal, in this order. Keep every terminal open while the robot is running.
+
+### Terminal 1: Left wheel service
+
+```bash
+export $(cat /tmp/SYS*.id)
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ezw/usr/lib
+/opt/ezw/usr/bin/ezw-smc-service /opt/ezw/usr/etc/ezw-smc-core/swd_left_config.ini
+```
+
+### Terminal 2: Right wheel service
+
+```bash
+export $(cat /tmp/SYS*.id)
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ezw/usr/lib
+/opt/ezw/usr/bin/ezw-smc-service /opt/ezw/usr/etc/ezw-smc-core/swd_right_config.ini
+```
+
+### Terminal 3: ROS 2 diff drive controller
+
+```bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ezw/usr/lib
+ros2 launch swd_ros2_controllers swd_diff_drive_controller.launch.py
 
 ### B- On your own IPC
 
